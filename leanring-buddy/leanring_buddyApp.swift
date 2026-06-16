@@ -30,6 +30,7 @@ struct leanring_buddyApp: App {
 @MainActor
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarPanelManager: MenuBarPanelManager?
+    private var floatingDockManager: FloatingDockManager?
     private let companionManager = CompanionManager()
     private var sparkleUpdaterController: SPUStandardUpdaterController?
 
@@ -43,12 +44,15 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         ClickyAnalytics.trackAppOpened()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+
+        // Always-visible floating dock hosting the full companion panel. The menu
+        // bar icon stays as a secondary entry point, so the menu bar drop-down is
+        // no longer auto-opened on launch — the dock already shows the same content
+        // (permissions, onboarding, controls) right up front.
+        floatingDockManager = FloatingDockManager(companionManager: companionManager)
+
         companionManager.start()
-        // Auto-open the panel if the user still needs to do something:
-        // either they haven't onboarded yet, or permissions were revoked.
-        if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
-            menuBarPanelManager?.showPanelOnLaunch()
-        }
+        floatingDockManager?.show()
         registerAsLoginItemIfNeeded()
         // startSparkleUpdater()
     }

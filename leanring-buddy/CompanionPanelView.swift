@@ -11,8 +11,10 @@ import AVFoundation
 import SwiftUI
 
 struct CompanionPanelView: View {
-  @ObservedObject var companionManager: CompanionManager
-  @State private var emailInput: String = ""
+  @ObservedObject var companionManager: CompanionManager    /// When false, the header's close (X) button is hidden. The always-visible
+    /// floating dock sets this to false because it is meant to stay on screen
+    /// persistently; the menu bar drop-down keeps it true so it can be dismissed.
+    var showsDismissButton: Bool = true  @State private var emailInput: String = ""
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -113,24 +115,22 @@ struct CompanionPanelView: View {
         .font(.system(size: 12, weight: .medium))
         .foregroundColor(DS.Colors.textTertiary)
 
-      Button(action: {
-        NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
-      }) {
-        Image(systemName: "xmark")
-          .font(.system(size: 10, weight: .semibold))
-          .foregroundColor(DS.Colors.textTertiary)
-          .frame(width: 20, height: 20)
-          .background(
-            Circle()
-              .fill(Color.white.opacity(0.08))
-          )
-      }
-      .buttonStyle(.plain)
-      .pointerCursor()
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 14)
-  }
+            if showsDismissButton {
+                Button(action: {
+                    NotificationCenter.default.post(name: .clickyDismissPanel, object: nil)
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .frame(width: 20, height: 20)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.08))
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
 
   // MARK: - Permissions Copy
 
