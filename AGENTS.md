@@ -9,6 +9,12 @@ macOS menu bar companion app. Lives entirely in the macOS status bar (no dock ic
 
 All API keys live on a Cloudflare Worker proxy — nothing sensitive ships in the app.
 
+### Employee Onboarding Flow (B2B)
+
+Layered on top of the companion core is a step-by-step onboarding product. A company's IT team authors an ordered list of setup steps in a web admin page (`GET /admin`), stored in Cloudflare KV. The app fetches a flow by id (`GET /flow/:id`, defaulting to the `OnboardingFlowID` Info.plist key or `"demo"`) and shows it as a checklist in the menu bar panel. For each step the new hire can press **Show me** or **Tell me**. Both capture the screen and send the current step + screenshot to Claude with a step-aware prompt. **Tell me** shows text guidance in the panel and flies the blue cursor to the relevant element (explanation only). **Show me** takes over the *real* macOS cursor — it glides the system pointer to Claude's `[POINT]` coordinate and clicks, so Clicky performs the step for the user (`CursorAutomation.swift`, via synthetic `CGEvent`s; needs Accessibility permission). **Done** advances; **Start again** resets to step one. This flow reuses the screenshot → Claude → POINT machinery and needs no voice (STT/TTS) APIs.
+
+> Safety note: **Show me** auto-clicks based on Claude's pixel guess. Accuracy is unvalidated — a wrong coordinate clicks the wrong element. Treat this as experimental.
+
 ## Architecture
 
 - **App Type**: Menu bar-only (`LSUIElement=true`), no dock icon or main window
@@ -32,9 +38,15 @@ The app never calls external APIs directly. All requests go through a Cloudflare
 | `POST /chat` | `api.anthropic.com/v1/messages` | Claude vision + streaming chat |
 | `POST /tts` | `api.elevenlabs.io/v1/text-to-speech/{voiceId}` | ElevenLabs TTS audio |
 | `POST /transcribe-token` | `streaming.assemblyai.com/v3/token` | Fetches a short-lived (480s) AssemblyAI websocket token |
+| `GET /flow/:id` | KV (`ONBOARDING_FLOWS`) | Fetch an onboarding flow (title + ordered steps) as JSON |
+| `PUT /flow/:id` | KV (`ONBOARDING_FLOWS`) | Create/replace an onboarding flow (validated, server re-numbers steps) |
+| `GET /admin` | — | Serves the IT-facing flow authoring page |
 
 Worker secrets: `ANTHROPIC_API_KEY`, `ASSEMBLYAI_API_KEY`, `ELEVENLABS_API_KEY`
 Worker vars: `ELEVENLABS_VOICE_ID`
+Worker KV: `ONBOARDING_FLOWS` (simulated automatically by `wrangler dev`; create a real namespace for deploy)
+
+> Note: `/admin` and `PUT /flow/:id` are unauthenticated in the MVP. Put them behind auth before any real deployment.
 
 ### Key Architecture Decisions
 
@@ -53,7 +65,10 @@ Worker vars: `ELEVENLABS_VOICE_ID`
 | File | Lines | Purpose |
 |------|-------|---------|
 | `leanring_buddyApp.swift` | ~89 | Menu bar app entry point. Uses `@NSApplicationDelegateAdaptor` with `CompanionAppDelegate` which creates `MenuBarPanelManager` and starts `CompanionManager`. No main window — the app lives entirely in the status bar. |
-| `CompanionManager.swift` | ~1026 | Central state machine. Owns dictation, shortcut monitoring, screen capture, Claude API, ElevenLabs TTS, and overlay management. Tracks voice state (idle/listening/processing/responding), conversation history, model selection, and cursor visibility. Coordinates the full push-to-talk → screenshot → Claude → TTS → pointing pipeline. |
+| `CompanionManager.swift` | ~1300 | Central state machine. Owns dictation, shortcut monitoring, screen capture, Claude API, ElevenLabs TTS, and overlay management. Tracks voice state (idle/listening/processing/responding), conversation history, model selection, and cursor visibility. Coordinates the full push-to-talk → screenshot → Claude → TTS → pointing pipeline. Also owns the employee onboarding flow state machine (`loadOnboardingFlow`, `advanceOnboardingStep`, `restartOnboardingFlow`, `requestGuidanceForCurrentStep`), the shared `resolvePointingLocation(...)` / `applyPointing(...)` helpers used by both voice and onboarding, and the `OnboardingGuidanceReason` (`showMe` / `tellMe`) branch. |
+| `CursorAutomation.swift` | ~110 | Drives the REAL macOS pointer for the onboarding "Show me" action: converts an AppKit global point to Core Graphics coords, glides the system cursor along an eased path, and posts a synthetic left click via `CGEvent`. Requires Accessibility permission. |
+| `OnboardingFlow.swift` | ~85 | `OnboardingStep`/`OnboardingFlow` Codable models + `OnboardingFlowService` that fetches a flow from the Worker (`GET /flow/:id`). Read-only on the client. |
+| `OnboardingPanelView.swift` | ~300 | SwiftUI checklist UI shown in the panel: current step, progress bar, Claude guidance, and the Show me / Tell me / Done / Start again actions. |
 | `MenuBarPanelManager.swift` | ~243 | NSStatusItem + custom NSPanel lifecycle. Creates the menu bar icon, manages the floating companion panel (show/hide/position), installs click-outside-to-dismiss monitor. |
 | `CompanionPanelView.swift` | ~761 | SwiftUI panel content for the menu bar dropdown. Shows companion status, push-to-talk instructions, model picker (Sonnet/Opus), permissions UI, DM feedback button, and quit button. Dark aesthetic using `DS` design system. |
 | `OverlayWindow.swift` | ~881 | Full-screen transparent overlay hosting the blue cursor, response text, waveform, and spinner. Handles cursor animation, element pointing with bezier arcs, multi-monitor coordinate mapping, and fade-out transitions. |
@@ -74,7 +89,8 @@ Worker vars: `ELEVENLABS_VOICE_ID`
 | `ClickyAnalytics.swift` | ~121 | PostHog analytics integration for usage tracking. |
 | `WindowPositionManager.swift` | ~262 | Window placement logic, Screen Recording permission flow, and accessibility permission helpers. |
 | `AppBundleConfiguration.swift` | ~28 | Runtime configuration reader for keys stored in the app bundle Info.plist. |
-| `worker/src/index.ts` | ~142 | Cloudflare Worker proxy. Three routes: `/chat` (Claude), `/tts` (ElevenLabs), `/transcribe-token` (AssemblyAI temp token). |
+| `worker/src/index.ts` | ~330 | Cloudflare Worker. Proxy routes: `/chat` (Claude), `/tts` (ElevenLabs), `/transcribe-token` (AssemblyAI temp token). Onboarding routes: `GET`/`PUT /flow/:id` (KV-backed, validated) and `GET /admin`. |
+| `worker/src/adminPage.ts` | ~310 | Self-contained HTML/JS flow authoring page served at `/admin`. Builds step rows via DOM APIs (no innerHTML) and reads/writes flows through `/flow/:id`. |
 
 ## Build & Run
 

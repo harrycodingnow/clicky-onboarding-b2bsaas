@@ -4,3 +4,11 @@ compatibility_date = "2024-01-01"
 
 [vars]
 ELEVENLABS_VOICE_ID = "kPzsL2i3teMYv0FxEYQ6"
+
+# Stores onboarding flows authored via /admin. `wrangler dev` simulates this
+# locally with no setup. For production, create a real namespace once with:
+#   npx wrangler kv namespace create ONBOARDING_FLOWS
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "ONBOARDING_FLOWS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
